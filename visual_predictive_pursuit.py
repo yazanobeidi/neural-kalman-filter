@@ -10,35 +10,27 @@ model = nengo.Network()
 with model:
     
     # set standard deviations for random distributions
-    psi_sens_add, psi_sens_mult = 10, 1.5
-    int_pred_add, int_pred_mult = 5, 0.75
+    psi_sens_add, psi_sens_mult = 10/5, 1.5/5
+    int_pred_add, int_pred_mult = psi_sens_add/2, psi_sens_mult/2
     Q, R, D, OM = 1, psi_sens_add, psi_sens_mult, 0.3
     Q2, R2, D2, OM2 = 1, int_pred_add, int_pred_mult, 0.3
     B_int = 1
     def di_add():
         return np.random.normal(scale=psi_sens_add)
-        
     def di_mult():
         return np.random.normal(scale=psi_sens_mult)
-
     def beta_pred():
         return np.random.normal(scale=R2)
-
     def psi_pred():
         return np.random.normal(scale=D2)
-
     def epsilon_pred():
         return np.random.normal(scale=OM2)
-
     def nt_sens():
         return np.random.normal(scale=OM)
-
     def di_add_pred():
         return np.random.normal(scale=int_pred_add)
-
     def di_mult_pred():
         return np.random.normal(scale=int_pred_mult)
-
     G_int = 0.5 # also used 0.6
     tau_motor = 0.100 # seconds
     G_e = 1/tau_motor
@@ -46,18 +38,18 @@ with model:
     T_2 = 0.013 # seconds
 
     RS_det = nengo.Ensemble(n_neurons=500, dimensions=1)
-    RS_noisy = nengo.Ensemble(n_neurons=500, dimensions=1)
+    RS_noisy = nengo.Ensemble(n_neurons=500, dimensions=1, radius=2)
     K_sens_var = nengo.Ensemble(n_neurons=500, dimensions=2)
     K_sens = nengo.Ensemble(n_neurons=500, dimensions=1)
     # first dim holds conf_sens, second holds [1-k]
     conf_sens = nengo.Ensemble(n_neurons=500, dimensions=2)
-    RS_sens_hat = nengo.Ensemble(n_neurons=500, dimensions=1)
+    RS_sens_hat = nengo.Ensemble(n_neurons=500, dimensions=1, radius=5)
     # first dim holds RS_noisy-RS_sens_hat, second holds k
     RS_diff = nengo.Ensemble(n_neurons=500, dimensions=2)
     eye_vel = nengo.Ensemble(n_neurons=500, dimensions=1)
     target_vel = nengo.Node([0])
     
-    TV_pred_hat = nengo.Ensemble(n_neurons=500, dimensions=1)
+    TV_pred_hat = nengo.Ensemble(n_neurons=500, dimensions=1, radius=5)
     TV_diff = nengo.Ensemble(n_neurons=500, dimensions=2)
     TV_obs = nengo.Ensemble(n_neurons=500, dimensions=1)
     K_pred = nengo.Ensemble(n_neurons=500, dimensions=1)
@@ -76,28 +68,30 @@ with model:
     
     pre_motor = nengo.Ensemble(n_neurons=500, dimensions=1)
     
-    eye_pos = nengo.Ensemble(n_neurons=500, dimensions=1)
+    eye_pos = nengo.Ensemble(n_neurons=500, dimensions=1, radius=10)
 
     # Equation 1
     nengo.Connection(eye_vel, RS_det, transform=-1)
     nengo.Connection(target_vel, RS_det)
-    nengo.Connection(RS_det, RS_noisy, function=lambda x: x+x*di_mult()+di_add())
+    nengo.Connection(RS_det, RS_noisy, 
+                     function=lambda x: x+x*di_mult()+di_add())
     # Equation 5
     nengo.Connection(conf_sens[0], K_sens_var[0])
     nengo.Connection(RS_sens_hat, K_sens_var[1])
     nengo.Connection(K_sens_var, K_sens, 
-                     function=lambda x: x[0]*(1/(x[0]+R+D*(x[0]+x[1]*x[1])*D)))
+                     function=lambda x: x[0]*(1/(x[0]+(R**2)+\
+                                            (D**2)*(x[0]+x[1]*x[1])*(D**2))))
     # Equation 6
-    nengo.Connection(K_sens, conf_sens[1], synapse=0.01, 
+    nengo.Connection(K_sens, conf_sens[1], synapse=0.01, transform=0.01,
                      function=lambda x: 1-x)
     nengo.Connection(conf_sens, conf_sens[0], synapse=0.01, 
-                     function=lambda x: 0.01*(Q+OM+x[0]*x[1]))
+                     function=lambda x: Q**2+OM**2+x[0]*x[1])
     # Equation 4
     nengo.Connection(RS_noisy, RS_diff[0])
     nengo.Connection(RS_sens_hat, RS_diff[0], transform=-1)
     nengo.Connection(K_sens, RS_diff[1])
     nengo.Connection(RS_diff, RS_sens_hat, synapse=0.01, 
-                     function=lambda x: x[0]*x[1]+nt_sens())
+                     function=lambda x: 0.01*x[0]*x[1]+nt_sens())
     nengo.Connection(RS_sens_hat, RS_sens_hat, synapse=0.01)
     # Equation 10
     # later to change target_vel to
@@ -110,13 +104,14 @@ with model:
     nengo.Connection(TV_obs, TV_diff[0])
     nengo.Connection(K_pred, TV_diff[1])
     nengo.Connection(TV_diff, TV_pred_hat, synapse=0.01, 
-                     function=lambda x: x[0]*x[1]+epsilon_pred())
+                     function=lambda x: 0.01*x[0]*x[1]+epsilon_pred())
     nengo.Connection(TV_pred_hat, TV_pred_hat, synapse=0.01)
     # Equation 12
     nengo.Connection(conf_pred, K_pred_var[0])
     nengo.Connection(TV_pred_hat, K_pred_var[1])
     nengo.Connection(K_pred_var, K_pred, 
-                     function=lambda x: x[0]*(1/(x[0]+R2+D2*(x[0]+x[1]*x[1])*D2)))
+                     function=lambda x: x[0]*(1/(x[0]+(R2**2)+\
+                                            (D2**2)*(x[0]+x[1]*x[1])*(D2**2))))
     # Equation 13
     nengo.Connection(K_pred, conf_pred, function=lambda x: Q2+OM2+(1-x))
     # Equation 15
@@ -144,8 +139,8 @@ with model:
     
     # Leaky Integrator, Fig 3
     nengo.Connection(leaky_integrator, leaky_integrator, synapse=0.01, 
-                     function=lambda x: 0.01*x*G_int*G_e)
-    nengo.Connection(Av, leaky_integrator, function=lambda x: x*G_int,
+                     function=lambda x: x*G_int*G_e)
+    nengo.Connection(Av, leaky_integrator, function=lambda x: 0.01*x*G_int,
                      synapse=nengo.LinearFilter([tau_motor, 0], 
                                                 [tau_motor, 1, 0]))
                                                 
